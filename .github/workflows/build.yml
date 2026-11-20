@@ -1,0 +1,56 @@
+# GitHub 에 올리면 Windows exe 를 자동으로 만들어 줍니다 (Releases 에서 다운로드)
+name: build-exe
+on:
+  push:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt pyinstaller
+      - name: 규칙 시험 (파이썬)
+        run: python app.py --selftest selftest_py.txt & type selftest_py.txt
+        shell: cmd
+      - run: >
+          pyinstaller --noconfirm --onefile --windowed --name ScheduleEdit
+          --add-data "input_template.html;." --add-data "사용법.txt;."
+          --collect-submodules gspread --collect-data certifi
+          app.py
+      - name: exe 자체 시험
+        shell: powershell
+        run: |
+          $p = Start-Process -FilePath dist\ScheduleEdit.exe -ArgumentList '--selftest', "$PWD\selftest.txt" -Wait -PassThru
+          Get-Content selftest.txt -Encoding UTF8
+          exit $p.ExitCode
+      - name: 화면 시험
+        shell: powershell
+        run: |
+          $p = Start-Process -FilePath dist\ScheduleEdit.exe -ArgumentList '--uitest', "$PWD\uitest.txt" -Wait -PassThru
+          Get-Content uitest.txt -Encoding UTF8
+          exit $p.ExitCode
+      - name: 다운로드용 zip 만들기
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force pkg/ScheduleEdit | Out-Null
+          Copy-Item dist/ScheduleEdit.exe pkg/ScheduleEdit/
+          Copy-Item 사용법.txt pkg/ScheduleEdit/
+          Compress-Archive -Path pkg/ScheduleEdit -DestinationPath ScheduleEdit.zip -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ScheduleEdit
+          path: ScheduleEdit.zip
+      - name: 릴리스에 올리기 (다운로드 링크)
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.${{ github.run_number }}
+          name: 스케줄 수정 v1.${{ github.run_number }}
+          body: ScheduleEdit.zip 을 받아서 압축을 풀고 ScheduleEdit.exe 를 실행하세요. (Python 설치 필요 없음) 처음엔 사용법.txt 의 '처음 한 번' 순서대로 구글 연결을 해주세요.
+          files: ScheduleEdit.zip
+          make_latest: true

@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>스케줄 수정 요청</title>
+<style>
+  :root { --blue:#2f6fdf; --line:#d9dee7; --bg:#f5f7fb; --bad:#c00000; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:"Malgun Gothic","Apple SD Gothic Neo",sans-serif; background:var(--bg); color:#222; }
+  .wrap { max-width:1100px; margin:0 auto; padding:24px 16px 80px; }
+  h1 { font-size:21px; margin:0 0 4px; }
+  .sub { color:#666; font-size:13px; margin-bottom:16px; line-height:1.6; }
+  .top { display:flex; gap:12px; align-items:end; flex-wrap:wrap; background:#fff; border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin-bottom:12px; }
+  label { display:flex; flex-direction:column; font-size:12px; color:#555; gap:3px; }
+  input, select { font:inherit; font-size:14px; padding:7px 8px; border:1px solid #c7cfdc; border-radius:6px; background:#fff; min-width:0; }
+  input:focus, select:focus { outline:2px solid #9db8ef; border-color:var(--blue); }
+  input:disabled { background:#f0f2f5; border-color:#e3e6eb; color:#aaa; }
+  input.err, select.err { border-color:var(--bad); background:#fff5f5; }
+  .rows { display:flex; flex-direction:column; gap:8px; }
+  .r { background:#fff; border:1px solid var(--line); border-radius:10px; padding:10px 12px; display:grid;
+       grid-template-columns: 28px 70px 80px 110px 70px 110px 82px 110px 82px 1fr 28px; gap:8px; align-items:end; }
+  .r .n { color:#999; font-size:13px; align-self:center; text-align:center; }
+  .r .del { border:none; background:none; color:#aaa; font-size:20px; cursor:pointer; align-self:center; }
+  .r .del:hover { color:var(--bad); }
+  .msg { grid-column: 2 / -1; font-size:12px; color:var(--bad); }
+  .btns { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+  button.btn { border:1px solid var(--line); background:#fff; border-radius:8px; padding:10px 16px; font:inherit; font-size:14px; cursor:pointer; }
+  button.btn:hover { border-color:var(--blue); color:var(--blue); }
+  button.main { background:var(--blue); color:#fff; border:none; font-weight:bold; }
+  button.main:hover { background:#2459bd; color:#fff; }
+  .help { font-size:12px; color:#666; background:#fff; border:1px solid var(--line); border-radius:10px; padding:10px 14px; margin-top:14px; line-height:1.8; }
+  .help b { color:#333; }
+  @media (max-width: 900px) {
+    .r { grid-template-columns: 1fr 1fr; }
+    .r .n { grid-column: 1 / -1; text-align:left; }
+    .r .del { grid-column: 1 / -1; justify-self:end; }
+    .msg { grid-column: 1 / -1; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>스케줄 수정 요청</h1>
+  <div class="sub">칸에 글자를 치면 아래에 후보가 떠요 (예: 치료사 칸에 <b>김</b> → 김선아, 김진수 …).
+    다 쓰고 <b>엑셀로 저장</b>을 누른 뒤, 받은 파일을 정웅쌤께 보내주세요.</div>
+
+  <div class="top">
+    <label>요청한 쌤 (내 이름)<input id="who" list="dlTh" placeholder="이름" style="width:130px"></label>
+    <label>날짜 (기본값)<input id="day" placeholder="예: 21" style="width:90px"></label>
+    <span style="font-size:12px;color:#888;padding-bottom:9px">날짜를 줄마다 다르게 쓰려면 아래 줄에서 바꾸면 돼요.</span>
+  </div>
+
+  <div class="rows" id="rows"></div>
+
+  <div class="btns">
+    <button class="btn" id="add">+ 줄 추가</button>
+    <button class="btn main" id="save">엑셀로 저장</button>
+    <button class="btn" id="reset">모두 지우기</button>
+  </div>
+
+  <div class="help">
+    <b>이동</b> 환자·코드·치료사·시간 → 받는 치료사·받는 시간 (받는 시간을 비우면 같은 시간)<br>
+    <b>추가</b> 치료사·시간·넣을 글자 (예: 홍길동 N-서식)<br>
+    <b>삭제</b> 환자·코드·치료사·시간 (아래 └서식 같은 줄도 같이 지워져요)<br>
+    <b>수정</b> 환자·코드·치료사·시간 + 바꿀 글자<br>
+    F 줄은 바로 아래 시간으로 적어요 (10:05 위의 F → 10:05).
+  </div>
+</div>
+
+<datalist id="dlTh"></datalist>
+<datalist id="dlTime"></datalist>
+<datalist id="dlPat"></datalist>
+
+<script>
+const THERAPISTS = __THERAPISTS__;
+const PATIENTS = __PATIENTS__;
+const TIMES = ["8:30","9:00","9:35","10:05","10:40","11:10","11:45","1:15","1:45","2:20","2:50","3:25","3:55","4:30","5:00"];
+const CODES = ["M","N","G","F","NB"];
+const ACTS = ["이동","추가","삭제","수정"];
+const $ = (id) => document.getElementById(id);
+const fill = (id, arr) => { $(id).innerHTML = arr.map(v => `<option value="${v}">`).join(""); };
+fill("dlTh", THERAPISTS); fill("dlTime", TIMES); fill("dlPat", PATIENTS);
+
+// 상태 저장 (실수로 창 닫아도 남게)
+const KEY = "schedReq_v1";
+const store = { get(){ try { return JSON.parse(localStorage.getItem(KEY) || "null"); } catch(e){ return null; } },
+                set(v){ try { localStorage.setItem(KEY, JSON.stringify(v)); } catch(e){} } };
+
+const FIELDS = [
+  ["date","날짜","input",""],["act","작업","select",ACTS],["pat","환자","input","dlPat"],["code","코드","select",CODES],
+  ["th","치료사","input","dlTh"],["t","시간","input","dlTime"],["th2","받는 치료사","input","dlTh"],["t2","받는 시간","input","dlTime"],
+  ["text","넣을/바꿀 글자","input",""],
+];
+const NEED = { 이동:["pat","th","th2"], 추가:["th","t","text"], 삭제:["pat","th"], 수정:["pat","th","text"] };
+const OFF  = { 이동:["text"], 추가:["pat","code","th2","t2"], 삭제:["th2","t2","text"], 수정:["th2","t2"] };
+
+function addRow(v = {}) {
+  const r = document.createElement("div"); r.className = "r";
+  let html = `<span class="n"></span>`;
+  for (const [k, lab, type, opt] of FIELDS) {
+    if (type === "select") html += `<label>${lab}<select data-k="${k}"><option value=""></option>${opt.map(o=>`<option>${o}</option>`).join("")}</select></label>`;
+    else html += `<label>${lab}<input data-k="${k}" ${opt ? `list="${opt}"` : ""} autocomplete="off"></label>`;
+  }
+  html += `<button class="del" title="이 줄 지우기">×</button><div class="msg"></div>`;
+  r.innerHTML = html;
+  for (const el of r.querySelectorAll("[data-k]")) {
+    if (v[el.dataset.k] !== undefined) el.value = v[el.dataset.k];
+    el.addEventListener("input", () => { el.classList.remove("err"); sync(r); save(); });
+    el.addEventListener("change", () => { sync(r); save(); });
+  }
+  r.querySelector('[data-k="date"]').placeholder = "기본값";
+  r.querySelector('[data-k="text"]').placeholder = "추가·수정할 때만";
+  r.querySelector(".del").onclick = () => { r.remove(); number(); save(); if (!$("rows").children.length) addRow(); };
+  $("rows").appendChild(r); sync(r); number();
+  return r;
+}
+function number() { [...$("rows").children].forEach((r, i) => r.querySelector(".n").textContent = i + 1); }
+function sync(r) {
+  const act = r.querySelector('[data-k="act"]').value;
+  for (const el of r.querySelectorAll("[data-k]")) {
+    const off = act && (OFF[act] || []).includes(el.dataset.k);
+    el.disabled = off; if (off) { el.value = ""; el.classList.remove("err"); }
+  }
+}
+function rowsData() {
+  return [...$("rows").children].map(r => {
+    const o = {}; for (const el of r.querySelectorAll("[data-k]")) o[el.dataset.k] = el.value.trim(); return o;
+  });
+}
+function save() { store.set({ who: $("who").value, day: $("day").value, rows: rowsData() }); }
+$("who").oninput = save; $("day").oninput = save;
+$("add").onclick = () => { const r = addRow(); r.querySelector('[data-k="act"]').focus(); save(); };
+$("reset").onclick = () => { if (!confirm("적은 내용을 모두 지울까요?")) return; $("rows").innerHTML = ""; addRow(); addRow(); addRow(); save(); };
+
+// 시작
+(() => {
+  const s = store.get();
+  if (s) { $("who").value = s.who || ""; $("day").value = s.day || ""; }
+  const rows = (s && s.rows && s.rows.some(x => Object.values(x).some(Boolean))) ? s.rows : [{}, {}, {}];
+  rows.forEach(addRow);
+  if (!$("day").value) { const d = new Date(); d.setDate(d.getDate() + 1); $("day").value = String(d.getDate()); }
+})();
+
+// 검사
+function check() {
+  let ok = true, any = false;
+  for (const r of $("rows").children) {
+    const g = (k) => r.querySelector(`[data-k="${k}"]`);
+    const act = g("act").value, msg = r.querySelector(".msg"); msg.textContent = "";
+    const filled = [...r.querySelectorAll("[data-k]")].some(el => el.value.trim() && el.dataset.k !== "date");
+    if (!act) { if (filled) { g("act").classList.add("err"); msg.textContent = "작업(이동/추가/삭제/수정)을 골라주세요"; ok = false; } continue; }
+    any = true;
+    const miss = NEED[act].filter(k => !g(k).value.trim());
+    if (act === "삭제" || act === "수정" || act === "이동") if (!g("t").value.trim()) {} // 시간은 선택
+    miss.forEach(k => g(k).classList.add("err"));
+    const bad = [];
+    for (const k of ["th","th2","who"]) {
+      const el = k === "who" ? $("who") : g(k);
+      if (el.value.trim() && !THERAPISTS.some(n => n === el.value.trim() || n.endsWith(el.value.trim()))) { el.classList.add("err"); bad.push(`'${el.value}'는 치료사 목록에 없어요`); }
+    }
+    for (const k of ["t","t2"]) if (g(k).value.trim() && !/^\d{1,2}\s*[:;시]?\s*\d{0,2}분?$/.test(g(k).value.trim())) { g(k).classList.add("err"); bad.push(`시간 '${g(k).value}'를 확인하세요`); }
+    if (miss.length || bad.length) {
+      ok = false;
+      msg.textContent = [miss.length ? FIELDS.filter(f => miss.includes(f[0])).map(f => f[1]).join(", ") + " 칸을 채워주세요" : "", ...bad].filter(Boolean).join(" · ");
+    }
+  }
+  if (!$("who").value.trim()) { $("who").classList.add("err"); ok = false; alert("맨 위 '요청한 쌤'에 이름을 적어주세요"); return false; }
+  if (!any) { alert("적은 줄이 없어요"); return false; }
+  if (!ok) alert("빨간 칸을 확인해주세요");
+  return ok;
+}
+
+// ===== xlsx 만들기 (외부 라이브러리 없음) =====
+const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+const crc32 = (b) => { let c = 0xffffffff; for (let i = 0; i < b.length; i++) c = CRC[(c ^ b[i]) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+async function deflate(u8) { return new Uint8Array(await new Response(new Blob([u8]).stream().pipeThrough(new CompressionStream("deflate-raw"))).arrayBuffer()); }
+async function zip(files) {
+  const te = new TextEncoder(), parts = [], cen = []; let off = 0;
+  for (const [name, text] of files) {
+    const nb = te.encode(name), data = te.encode(text), raw = await deflate(data), crc = crc32(data);
+    const h = new DataView(new ArrayBuffer(30));
+    h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true); h.setUint16(8, 8, true);
+    h.setUint16(12, 0x5b21, true); h.setUint32(14, crc, true); h.setUint32(18, raw.length, true); h.setUint32(22, data.length, true); h.setUint16(26, nb.length, true);
+    parts.push(new Uint8Array(h.buffer), nb, raw);
+    const c = new DataView(new ArrayBuffer(46));
+    c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0x0800, true); c.setUint16(10, 8, true);
+    c.setUint16(14, 0x5b21, true); c.setUint32(16, crc, true); c.setUint32(20, raw.length, true); c.setUint32(24, data.length, true); c.setUint16(28, nb.length, true); c.setUint32(42, off, true);
+    cen.push(new Uint8Array(c.buffer), nb); off += 30 + nb.length + raw.length;
+  }
+  const size = cen.reduce((a, b) => a + b.length, 0), e = new DataView(new ArrayBuffer(22));
+  e.setUint32(0, 0x06054b50, true); e.setUint16(8, files.length, true); e.setUint16(10, files.length, true); e.setUint32(12, size, true); e.setUint32(16, off, true);
+  return new Blob([...parts, ...cen, new Uint8Array(e.buffer)], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+}
+const x = (s) => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+const col = (i) => String.fromCharCode(65 + i);
+function sheetXml(grid) {
+  const rows = grid.map((row, ri) => `<row r="${ri + 1}">` + row.map((v, ci) => v === "" || v == null ? "" :
+    `<c r="${col(ci)}${ri + 1}" t="inlineStr"${ri === 3 ? ' s="1"' : ""}><is><t xml:space="preserve">${x(v)}</t></is></c>`).join("") + "</row>").join("");
+  const widths = [8,7,11,6,11,8,12,9,24,11,40].map((w, i) => `<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"/>`).join("");
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="4" topLeftCell="A5" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols>${widths}</cols><sheetData>${rows}</sheetData></worksheet>`;
+}
+async function makeXlsx(grid) {
+  return zip([
+    ["[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`],
+    ["_rels/.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`],
+    ["xl/workbook.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="수정입력" sheetId="1" r:id="rId1"/></sheets></workbook>`],
+    ["xl/_rels/workbook.xml.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`],
+    ["xl/styles.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="10"/><name val="맑은 고딕"/><family val="3"/></font><font><b/><sz val="10"/><name val="맑은 고딕"/><family val="3"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`],
+    ["xl/worksheets/sheet1.xml", sheetXml(grid)],
+  ]);
+}
+
+$("save").onclick = async () => {
+  for (const el of document.querySelectorAll(".err")) el.classList.remove("err");
+  if (!check()) return;
+  const who = $("who").value.trim(), day = $("day").value.trim();
+  const grid = [
+    ["스케줄 수정 요청 — " + who], ["웹 입력 화면에서 만든 파일"], [""],
+    ["날짜","작업","환자","코드","치료사","시간","받는 치료사","받는 시간","넣을/바꿀 글자","요청한 쌤","결과 (자동)"],
+  ];
+  for (const v of rowsData()) if (v.act) grid.push([v.date || day, v.act, v.pat, v.code, v.th, v.t, v.th2, v.t2, v.text, who]);
+  const blob = await makeXlsx(grid);
+  const d = new Date(), p = (n) => String(n).padStart(2, "0");
+  const name = `수정요청_${who}_${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.xlsx`;
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => { if (confirm(`'${name}' 저장했어요 (다운로드 폴더).\n정웅쌤께 보내주세요.\n\n보낸 뒤 적은 내용을 지울까요?`)) { $("rows").innerHTML = ""; addRow(); addRow(); addRow(); save(); } }, 400);
+};
+</script>
+</body>
+</html>
